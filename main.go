@@ -1,12 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net"
-	"sync"
 )
 
+/*
 type Client struct {
 	L *net.UDPConn
 }
@@ -61,13 +60,9 @@ func handle(client net.Addr, data []byte, listener *net.UDPConn) {
 }
 
 func startUdpEchoServer(addr string) {
-	udpAddr, err := net.ResolveUDPAddr("udp", addr)
+	udpConn, err := net.ListenPacket("udp", addr)
 	if err != nil {
-		log.Fatal("Unable to start UDP Server: %s", err)
-	}
-	udpConn, err := net.ListenUDP("udp", udpAddr)
-	if err != nil {
-		log.Fatal("Unable to start UDP Server: %s", err)
+		log.Fatal(err)
 	}
 
 	bytes := make([]byte, 1024*1024)
@@ -83,71 +78,70 @@ func startUdpEchoServer(addr string) {
 		handle(client, bytes[:n], udpConn)
 	}
 }
+*/
 
 type Handler interface {
-	ServeUDP(*Conn)
+	ServeUDP(*dataFlow)
 }
 
-type Server struct {
+type EchoServer struct {
 	addr string
-	handler Handler
 }
 
-func (s *Server) Start() {
-	udpAddr, err := net.ResolveUDPAddr("udp", s.addr)
+func (s *EchoServer) Start() {
+	listener, err := net.ListenPacket("udp", s.addr)
 	if err != nil {
-		log.Fatal("Unable to start UDP Server: %s", err)
+		log.Fatal(err)
 	}
 
-	listener, err := net.ListenUDP("udp", udpAddr)
-	if err != nil {
-		log.Fatal("Unable to start UDP Server: %s", err)
-	}
-
-	bytes := make([]byte, 1024*1024)
-	conns := map[net.Addr]*Conn{}
+	data := make([]byte, 1024*1024)
+	conns := make(map[net.Addr]*dataFlow)
 	for {
-		n, client, err := listener.ReadFrom(bytes)
+		n, client, err := listener.ReadFrom(data)
 		if err != nil {
-			log.Printf("Error while reading: %+v", err)
+			log.Printf("Error while reading: %v", err)
+			continue
 		}
+		println("BYTES READ: ", n)
 
-		var conn *Conn
-		if conn, ok := conns[client]; !ok {
-			conn = &Conn{client: client, udpConn: listener}
-			conns[client] = conn
-			if s.handler != nil {
-				go func() {
-					defer delete(conns, client)
-					s.handler.ServeUDP(conn)
-				}()
+		var df *dataFlow
+		df, ok := conns[client]
+		if !ok {
+			df = &dataFlow{
+				conn: listener,
+				peer: client,
+				data: make(chan []byte),
 			}
+			conns[client] = df
+			go func() {
+				defer delete(conns, client)
+				s.ServeUDP(df)
+			}()
 		}
-		conn.AddNewBytes(bytes)
-
+		df.data <- data[:n]
 
 	}
 }
 
-type Conn struct {
-	bytes []byte
-	udpConn *net.UDPConn
-	client net.Addr
+func (s *EchoServer) ServeUDP(d *dataFlow) {
+	for {
+		println("WAITING")
+		data := <-d.data
+		n, err := d.conn.WriteTo(data, d.peer)
+		if err != nil {
+			log.Printf("WATUP: %v", err)
+		}
+		println("BYTES SENT: ", n)
+	}
 }
 
-func (c *Conn) AddNewBytes(bytes []byte) {
-
-}
-
-func (c *Conn) Read(bytes []byte) (int, error) {
-	bytes = c.bytes
-	return 0, nil
-}
-
-func (c *Conn) Write(bytes []byte) (int, error) {
-	return c.udpConn.WriteTo(bytes, c.client)
+type dataFlow struct {
+	data chan []byte // TODO: async?
+	conn net.PacketConn
+	peer net.Addr
 }
 
 func main() {
-	startUdpEchoServer(":8081")
+	s := EchoServer{addr: ":8081"}
+	s.Start()
 }
