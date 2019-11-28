@@ -85,11 +85,17 @@ type Handler interface {
 }
 
 type EchoServer struct {
-	addr string
+	listenAddr string
+}
+
+type dataFlow struct {
+	data chan []byte // TODO: async?
+	conn net.PacketConn
+	peer net.Addr
 }
 
 func (s *EchoServer) Start() {
-	listener, err := net.ListenPacket("udp", s.addr)
+	listener, err := net.ListenPacket("udp", s.listenAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -135,13 +141,12 @@ func (s *EchoServer) ServeUDP(d *dataFlow) {
 	}
 }
 
-type dataFlow struct {
-	data chan []byte // TODO: async?
-	conn net.PacketConn
-	peer net.Addr
+type Proxy struct {
+	listenAddr  string
+	forwardAddr string
 }
 
 func main() {
-	s := EchoServer{addr: ":8081"}
+	s := EchoServer{listenAddr: ":8081"}
 	s.Start()
 }
